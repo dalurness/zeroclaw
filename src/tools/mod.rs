@@ -206,6 +206,7 @@ pub fn all_tools(
     agents: &HashMap<String, DelegateAgentConfig>,
     fallback_api_key: Option<&str>,
     root_config: &crate::config::Config,
+    secret_registry: Option<Arc<crate::secrets::SecretRegistry>>,
 ) -> Vec<Box<dyn Tool>> {
     all_tools_with_runtime(
         config,
@@ -221,6 +222,7 @@ pub fn all_tools(
         agents,
         fallback_api_key,
         root_config,
+        secret_registry,
     )
 }
 
@@ -240,6 +242,7 @@ pub fn all_tools_with_runtime(
     agents: &HashMap<String, DelegateAgentConfig>,
     fallback_api_key: Option<&str>,
     root_config: &crate::config::Config,
+    secret_registry: Option<Arc<crate::secrets::SecretRegistry>>,
 ) -> Vec<Box<dyn Tool>> {
     let has_shell_access = runtime.has_shell_access();
     let has_filesystem_access = runtime.has_filesystem_access();
@@ -523,6 +526,25 @@ pub fn all_tools_with_runtime(
         }
     }
 
+    // Secrets tools — always registered when a registry is available
+    if let Some(ref reg) = secret_registry {
+        tool_arcs.push(Arc::new(
+            crate::secrets::tools::SecretsSetTool::new(reg.clone()),
+        ));
+        tool_arcs.push(Arc::new(
+            crate::secrets::tools::SecretsListTool::new(reg.clone()),
+        ));
+        tool_arcs.push(Arc::new(
+            crate::secrets::tools::SecretsDeleteTool::new(reg.clone()),
+        ));
+        tool_arcs.push(Arc::new(
+            crate::secrets::tools::SecretsInjectTool::new(reg.clone()),
+        ));
+        tool_arcs.push(Arc::new(
+            crate::secrets::tools::SecretsStoresTool::new(reg.clone()),
+        ));
+    }
+
     boxed_registry_from_arcs(tool_arcs)
 }
 
@@ -608,6 +630,7 @@ mod tests {
             &HashMap::new(),
             None,
             &cfg,
+            None,
         );
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(!names.contains(&"browser_open"));
@@ -650,6 +673,7 @@ mod tests {
             &HashMap::new(),
             None,
             &cfg,
+            None,
         );
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"browser_open"));
@@ -690,6 +714,7 @@ mod tests {
             &HashMap::new(),
             None,
             &cfg,
+            None,
         );
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"wasm_module"));
@@ -842,6 +867,7 @@ mod tests {
             &agents,
             Some("delegate-test-credential"),
             &cfg,
+            None,
         );
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"delegate"));
@@ -876,6 +902,7 @@ mod tests {
             &HashMap::new(),
             None,
             &cfg,
+            None,
         );
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(!names.contains(&"delegate"));
@@ -927,6 +954,7 @@ mod tests {
             &agents,
             Some("delegate-test-credential"),
             &cfg,
+            None,
         );
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"delegate"));

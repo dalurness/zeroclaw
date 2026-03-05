@@ -66,6 +66,7 @@ pub mod peripherals;
 pub mod providers;
 pub mod rag;
 pub mod runtime;
+pub mod secrets;
 pub(crate) mod security;
 pub(crate) mod service;
 pub(crate) mod skills;
@@ -163,6 +164,62 @@ pub enum SkillCommands {
         /// Skill name to remove
         name: String,
     },
+}
+
+/// Secrets management subcommands
+#[derive(Subcommand, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SecretsCommands {
+    /// Store a secret
+    Set {
+        /// Secret key name (alphanumeric + underscores, auto-uppercased)
+        key: String,
+        /// Secret value
+        value: String,
+        /// Target store name
+        #[arg(long)]
+        store: Option<String>,
+    },
+    /// Retrieve a secret value (gated by cli_get_enabled config flag)
+    Get {
+        /// Secret key name
+        key: String,
+        /// Target store name
+        #[arg(long)]
+        store: Option<String>,
+    },
+    /// List secret key names
+    List {
+        /// Show internal (__-prefixed) keys
+        #[arg(long)]
+        all: bool,
+        /// Target store name
+        #[arg(long)]
+        store: Option<String>,
+    },
+    /// Delete a secret
+    Delete {
+        /// Secret key name to delete
+        key: String,
+        /// Target store name
+        #[arg(long)]
+        store: Option<String>,
+    },
+    /// Substitute {{secret:KEY}} tokens in a file or stdin, write to stdout
+    Inject {
+        /// File path or `-` for stdin
+        file: String,
+        /// Default store for token resolution
+        #[arg(long)]
+        store: Option<String>,
+    },
+    /// Re-encrypt the local secrets blob with a fresh nonce (local backend only)
+    RotateKey {
+        /// Target store name
+        #[arg(long)]
+        store: Option<String>,
+    },
+    /// List configured secret stores
+    Stores,
 }
 
 /// Migration subcommands

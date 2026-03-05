@@ -1136,12 +1136,38 @@ pub struct SecretsConfig {
     /// Enable encryption for API keys and tokens in config.toml
     #[serde(default = "default_true")]
     pub encrypt: bool,
+    /// Whether `zeroclaw secrets get` is enabled from CLI (default false).
+    #[serde(default)]
+    pub cli_get_enabled: bool,
+    /// Ordered list of named secret stores. Config order is precedence order:
+    /// reads cascade top to bottom, writes default to first store.
+    #[serde(default)]
+    pub stores: Vec<SecretStoreEntry>,
 }
 
 impl Default for SecretsConfig {
     fn default() -> Self {
-        Self { encrypt: true }
+        Self {
+            encrypt: true,
+            cli_get_enabled: false,
+            stores: Vec::new(),
+        }
     }
+}
+
+/// Configuration for a single secret store entry in `[[secrets.stores]]`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SecretStoreEntry {
+    /// Store name (used with `--store` flag to target this store).
+    pub name: String,
+    /// Backend type: `"local"` (encrypted file) or `"external"` (provider binary).
+    pub backend: String,
+    /// Path to `.secrets` file (local backend only, default: `.secrets` in workspace).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store_path: Option<String>,
+    /// Path to provider binary (external backend only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_binary: Option<String>,
 }
 
 // ── Browser (friendly-service browsing only) ───────────────────
