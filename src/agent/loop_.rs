@@ -655,6 +655,7 @@ pub(crate) async fn run_tool_call_loop(
     let mut seen_tool_signatures: HashSet<(String, String)> = HashSet::new();
     let mut missing_tool_call_retry_used = false;
     let mut missing_tool_call_retry_prompt: Option<String> = None;
+    let mut any_tool_called_this_turn = false;
     let bypass_non_cli_approval_for_turn =
         approval.is_some_and(|mgr| channel_name != "cli" && mgr.consume_non_cli_allow_all_once());
     if bypass_non_cli_approval_for_turn {
@@ -919,8 +920,10 @@ pub(crate) async fn run_tool_call_loop(
         }
 
         if tool_calls.is_empty() {
-            let completion_claim_signal =
-                looks_like_unverified_action_completion_without_tool_call(&display_text);
+            // If a tool was already called earlier this turn, the final text is a
+            // legitimate confirmation — not an unverified completion claim.
+            let completion_claim_signal = !any_tool_called_this_turn
+                && looks_like_unverified_action_completion_without_tool_call(&display_text);
             let missing_tool_call_signal = parse_issue_detected || completion_claim_signal;
             let missing_tool_call_followthrough = !missing_tool_call_retry_used
                 && iteration + 1 < max_iterations
@@ -1024,6 +1027,9 @@ pub(crate) async fn run_tool_call_loop(
             history.push(ChatMessage::assistant(response_text.clone()));
             return Ok(display_text);
         }
+
+        // At least one tool call is about to execute this turn.
+        any_tool_called_this_turn = true;
 
         // Print any text the LLM produced alongside tool calls (unless silent)
         if !silent && !display_text.is_empty() {
@@ -3307,6 +3313,71 @@ mod tests {
         assert!(!looks_like_unverified_action_completion_without_tool_call(
             "I have a suggestion for the plan if you want me to proceed."
         ));
+    }
+
+    #[test]
+    fn looks_like_unverified_action_completion_ignores_confirmation_without_side_effect_object() {
+        // Regression: natural confirmation text after a real tool call should not
+        // trigger the detector (no side-effect verb + object combo).
+        assert!(!looks_like_unverified_action_completion_without_tool_call(
+            "Done! Every day at noon it'll scan the forecast and send you a heads-up."
+        ));
+    }
+
+    #[tokio::test]
+    async fn run_tool_call_loop_skips_completion_claim_check_after_tool_execution() {
+        // Integration guard: when a tool was called in an earlier iteration of
+        // the same turn, a completion-claim final response must NOT trigger a
+        // retry or bail — it is a legitimate confirmation.
+        let provider = ScriptedProvider::from_text_responses(vec![
+            r#"<tool_call>
+{"name":"count_tool","arguments":{"value":"do the thing"}}
+</tool_call>"#,
+            "Done — I've created the `names` folder in the current working directory.",
+        ]);
+
+        let invocations = Arc::new(AtomicUsize::new(0));
+        let tools_registry: Vec<Box<dyn Tool>> = vec![Box::new(CountingTool::new(
+            "count_tool",
+            Arc::clone(&invocations),
+        ))];
+
+        let mut history = vec![
+            ChatMessage::system("test-system"),
+            ChatMessage::user("please create the names folder"),
+        ];
+        let observer = NoopObserver;
+
+        let result = run_tool_call_loop(
+            &provider,
+            &mut history,
+            &tools_registry,
+            &observer,
+            "mock-provider",
+            "mock-model",
+            0.0,
+            true,
+            None,
+            "cli",
+            &crate::config::MultimodalConfig::default(),
+            5,
+            None,
+            None,
+            None,
+            &[],
+        )
+        .await
+        .expect("completion claim after real tool call should not trigger retry or bail");
+
+        assert_eq!(
+            result,
+            "Done — I've created the `names` folder in the current working directory."
+        );
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            1,
+            "tool should have been called exactly once"
+        );
     }
 
     #[test]
