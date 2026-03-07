@@ -8554,7 +8554,7 @@ enable = true
 
     #[test]
     async fn secrets_config_serde_roundtrip() {
-        let s = SecretsConfig { encrypt: false };
+        let s = SecretsConfig { encrypt: false, cli_get_enabled: false, stores: vec![] };
         let toml_str = toml::to_string(&s).unwrap();
         let parsed: SecretsConfig = toml::from_str(&toml_str).unwrap();
         assert!(!parsed.encrypt);

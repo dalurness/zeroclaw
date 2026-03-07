@@ -3202,7 +3202,7 @@ fn setup_tool_mode() -> Result<(ComposioConfig, SecretsConfig)> {
         .default(true)
         .interact()?;
 
-    let secrets_config = SecretsConfig { encrypt };
+    let secrets_config = SecretsConfig { encrypt, cli_get_enabled: false, stores: Vec::new() };
 
     if encrypt {
         println!(

@@ -413,7 +413,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config, secret_registry:
         &config.agents,
         config.api_key.as_deref(),
         &config,
-        secret_registry,
+        secret_registry.clone(),
     ));
     let tools_registry: Arc<Vec<ToolSpec>> =
         Arc::new(tools_registry_exec.iter().map(|t| t.spec()).collect());
@@ -2017,6 +2017,7 @@ mod tests {
             max_tool_iterations: 10,
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            secret_registry: None,
         };
 
         let response = handle_metrics(State(state), test_connect_info(), HeaderMap::new())
@@ -2073,6 +2074,7 @@ mod tests {
             max_tool_iterations: 10,
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            secret_registry: None,
         };
 
         let response = handle_metrics(State(state), test_connect_info(), HeaderMap::new())
@@ -2115,6 +2117,7 @@ mod tests {
             max_tool_iterations: 10,
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            secret_registry: None,
         };
 
         let response = handle_metrics(State(state), test_public_connect_info(), HeaderMap::new())
@@ -2158,6 +2161,7 @@ mod tests {
             max_tool_iterations: 10,
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            secret_registry: None,
         };
 
         let unauthorized =
@@ -2627,6 +2631,7 @@ Reminder set successfully."#;
             max_tool_iterations: 10,
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            secret_registry: None,
         };
 
         let mut headers = HeaderMap::new();
@@ -2695,6 +2700,7 @@ Reminder set successfully."#;
             max_tool_iterations: 10,
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            secret_registry: None,
         };
 
         let unauthorized = handle_agent(
@@ -2744,6 +2750,7 @@ Reminder set successfully."#;
             max_tool_iterations: 10,
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            secret_registry: None,
         };
 
         let response = handle_webhook(
@@ -2793,6 +2800,7 @@ Reminder set successfully."#;
             max_tool_iterations: 10,
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            secret_registry: None,
         };
 
         let response = handle_node_control(
@@ -2847,6 +2855,7 @@ Reminder set successfully."#;
             max_tool_iterations: 10,
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            secret_registry: None,
         };
 
         let response = handle_node_control(
@@ -2906,6 +2915,7 @@ Reminder set successfully."#;
             max_tool_iterations: 10,
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            secret_registry: None,
         };
 
         let headers = HeaderMap::new();
@@ -2987,6 +2997,7 @@ Reminder set successfully."#;
             max_tool_iterations: 10,
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            secret_registry: None,
         };
 
         let response = handle_webhook(
@@ -3040,6 +3051,7 @@ Reminder set successfully."#;
             max_tool_iterations: 10,
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            secret_registry: None,
         };
 
         let mut headers = HeaderMap::new();
@@ -3098,6 +3110,7 @@ Reminder set successfully."#;
             max_tool_iterations: 10,
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            secret_registry: None,
         };
 
         let mut headers = HeaderMap::new();
@@ -3161,6 +3174,7 @@ Reminder set successfully."#;
             max_tool_iterations: 10,
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            secret_registry: None,
         };
 
         let response = Box::pin(handle_nextcloud_talk_webhook(
@@ -3220,6 +3234,7 @@ Reminder set successfully."#;
             max_tool_iterations: 10,
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            secret_registry: None,
         };
 
         let mut headers = HeaderMap::new();
@@ -3276,6 +3291,7 @@ Reminder set successfully."#;
             max_tool_iterations: 10,
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            secret_registry: None,
         };
 
         let response = Box::pin(handle_qq_webhook(
@@ -3327,6 +3343,7 @@ Reminder set successfully."#;
             max_tool_iterations: 10,
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            secret_registry: None,
         };
 
         let mut headers = HeaderMap::new();
