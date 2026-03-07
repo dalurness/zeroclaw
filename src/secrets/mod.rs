@@ -63,11 +63,12 @@ impl SecretRegistry {
         let keys = if let Some(name) = store {
             self.named(name)?.list().await?
         } else {
+            let mut seen = std::collections::HashSet::new();
             let mut all = Vec::new();
             for (_, s) in &self.stores {
                 if let Ok(keys) = s.list().await {
                     for k in keys {
-                        if !all.contains(&k) {
+                        if seen.insert(k.clone()) {
                             all.push(k);
                         }
                     }
