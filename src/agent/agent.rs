@@ -250,7 +250,7 @@ impl Agent {
         self.history.clear();
     }
 
-    pub fn from_config(config: &Config) -> Result<Self> {
+    pub fn from_config(config: &Config, secret_registry: Option<Arc<crate::secrets::SecretRegistry>>) -> Result<Self> {
         let observer: Arc<dyn Observer> =
             Arc::from(observability::create_observer(&config.observability));
         let runtime: Arc<dyn runtime::RuntimeAdapter> =
@@ -293,7 +293,7 @@ impl Agent {
             &config.agents,
             config.api_key.as_deref(),
             config,
-            None,
+            secret_registry,
         );
 
         let provider_name = config.default_provider.as_deref().unwrap_or("openrouter");
@@ -662,6 +662,7 @@ pub async fn run(
     provider_override: Option<String>,
     model_override: Option<String>,
     temperature: f64,
+    secret_registry: Option<Arc<crate::secrets::SecretRegistry>>,
 ) -> Result<()> {
     let start = Instant::now();
 
@@ -674,7 +675,7 @@ pub async fn run(
     }
     effective_config.default_temperature = temperature;
 
-    let mut agent = Agent::from_config(&effective_config)?;
+    let mut agent = Agent::from_config(&effective_config, secret_registry)?;
 
     let provider_name = effective_config
         .default_provider

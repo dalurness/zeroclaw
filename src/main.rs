@@ -38,6 +38,7 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use dialoguer::{Input, Password};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
+use std::sync::Arc;
 use tracing::{info, warn};
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -847,7 +848,7 @@ async fn main() -> Result<()> {
         }?;
         // Auto-start channels if user said yes during wizard
         if std::env::var("ZEROCLAW_AUTOSTART_CHANNELS").as_deref() == Ok("1") {
-            channels::start_channels(config).await?;
+            channels::start_channels(config, None).await?;
         }
         return Ok(());
     }
@@ -870,9 +871,45 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Build the SecretRegistry once and keep it alive for the daemon lifetime.
+    // Used for migration below, then threaded to gateway/channels/agent so the
+    // secrets LLM tools (secrets_set, secrets_list, etc.) are registered.
+    let secret_registry: Option<Arc<zeroclaw::secrets::SecretRegistry>> = {
+        let config_dir = config
+            .config_path
+            .parent()
+            .context("Config path must have a parent directory")?;
+        let stores_config = zeroclaw::secrets::SecretsStoresConfig {
+            cli_get_enabled: config.secrets.cli_get_enabled,
+            stores: config
+                .secrets
+                .stores
+                .iter()
+                .map(|s| zeroclaw::secrets::SecretStoreConfig {
+                    name: s.name.clone(),
+                    backend: s.backend.clone(),
+                    store_path: s.store_path.clone(),
+                    provider_binary: s.provider_binary.clone(),
+                })
+                .collect(),
+        };
+        match zeroclaw::secrets::build_registry(
+            &stores_config,
+            &config.workspace_dir,
+            config_dir,
+            config.secrets.encrypt,
+        ) {
+            Ok(registry) => Some(Arc::new(registry)),
+            Err(e) => {
+                tracing::warn!("secrets: failed to build registry: {e}");
+                None
+            }
+        }
+    };
+
     // Phase 4: Migrate credentials from config.toml to secret store on startup.
     // Only runs if there are credentials to migrate (api_key or channel tokens present).
-    {
+    if let Some(ref registry) = secret_registry {
         let has_credentials = config.api_key.is_some()
             || config
                 .channels_config
@@ -890,44 +927,14 @@ async fn main() -> Result<()> {
                 .as_ref()
                 .is_some_and(|s| !s.bot_token.is_empty());
         if has_credentials {
-            let config_dir = config
-                .config_path
-                .parent()
-                .context("Config path must have a parent directory")?;
-            let stores_config = zeroclaw::secrets::SecretsStoresConfig {
-                cli_get_enabled: config.secrets.cli_get_enabled,
-                stores: config
-                    .secrets
-                    .stores
-                    .iter()
-                    .map(|s| zeroclaw::secrets::SecretStoreConfig {
-                        name: s.name.clone(),
-                        backend: s.backend.clone(),
-                        store_path: s.store_path.clone(),
-                        provider_binary: s.provider_binary.clone(),
-                    })
-                    .collect(),
-            };
-            match zeroclaw::secrets::build_registry(
-                &stores_config,
-                &config.workspace_dir,
-                config_dir,
-                config.secrets.encrypt,
-            ) {
-                Ok(registry) => {
-                    if let Err(e) =
-                        zeroclaw::secrets::migration::migrate_config_credentials(
-                            &mut config,
-                            &registry,
-                        )
-                        .await
-                    {
-                        tracing::warn!("secrets migration: {e}");
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!("secrets migration: failed to build registry: {e}");
-                }
+            if let Err(e) =
+                zeroclaw::secrets::migration::migrate_config_credentials(
+                    &mut config,
+                    registry,
+                )
+                .await
+            {
+                tracing::warn!("secrets migration: {e}");
             }
         }
     }
@@ -974,6 +981,7 @@ async fn main() -> Result<()> {
                 temperature,
                 peripheral,
                 true,
+                secret_registry.clone(),
             ))
             .await
             .map(|_| ())
@@ -999,7 +1007,7 @@ async fn main() -> Result<()> {
             } else {
                 info!("🚀 Starting ZeroClaw Gateway on {host}:{port}");
             }
-            gateway::run_gateway(&host, port, config).await
+            gateway::run_gateway(&host, port, config, secret_registry.clone()).await
         }
 
         Commands::Daemon { port, host } => {
@@ -1010,7 +1018,7 @@ async fn main() -> Result<()> {
             } else {
                 info!("🧠 Starting ZeroClaw Daemon on {host}:{port}");
             }
-            daemon::run(config, host, port).await
+            daemon::run(config, host, port, secret_registry.clone()).await
         }
 
         Commands::Status => {
@@ -1209,7 +1217,7 @@ async fn main() -> Result<()> {
         },
 
         Commands::Channel { channel_command } => match channel_command {
-            ChannelCommands::Start => channels::start_channels(config).await,
+            ChannelCommands::Start => channels::start_channels(config, secret_registry.clone()).await,
             ChannelCommands::Doctor => channels::doctor_channels(config).await,
             other => channels::handle_command(other, &config).await,
         },

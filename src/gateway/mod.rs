@@ -325,11 +325,13 @@ pub struct AppState {
     pub cost_tracker: Option<Arc<CostTracker>>,
     /// SSE broadcast channel for real-time events
     pub event_tx: tokio::sync::broadcast::Sender<serde_json::Value>,
+    /// Secret registry for secrets LLM tools
+    pub secret_registry: Option<Arc<crate::secrets::SecretRegistry>>,
 }
 
 /// Run the HTTP gateway using axum with proper HTTP/1.1 compliance.
 #[allow(clippy::too_many_lines)]
-pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
+pub async fn run_gateway(host: &str, port: u16, config: Config, secret_registry: Option<Arc<crate::secrets::SecretRegistry>>) -> Result<()> {
     // ── Security: refuse public bind without tunnel or explicit opt-in ──
     if is_public_bind(host) && config.tunnel.provider == "none" && !config.gateway.allow_public_bind
     {
@@ -411,7 +413,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         &config.agents,
         config.api_key.as_deref(),
         &config,
-        None,
+        secret_registry,
     ));
     let tools_registry: Arc<Vec<ToolSpec>> =
         Arc::new(tools_registry_exec.iter().map(|t| t.spec()).collect());
@@ -695,6 +697,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         max_tool_iterations,
         cost_tracker,
         event_tx,
+        secret_registry,
     };
 
     // Config PUT needs larger body limit (1MB)
@@ -967,7 +970,7 @@ async fn run_gateway_chat_simple(state: &AppState, message: &str) -> anyhow::Res
 /// Full-featured chat with tools for channel handlers (WhatsApp, Linq, Nextcloud Talk).
 async fn run_gateway_chat_with_tools(state: &AppState, message: &str) -> anyhow::Result<String> {
     let config = state.config.lock().clone();
-    crate::agent::process_message(config, message).await
+    crate::agent::process_message(config, message, state.secret_registry.clone()).await
 }
 
 fn sanitize_gateway_response(response: &str, tools: &[Box<dyn Tool>]) -> String {

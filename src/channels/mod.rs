@@ -4692,7 +4692,7 @@ pub async fn doctor_channels(config: Config) -> Result<()> {
 
 /// Start all configured channels and route messages to the agent
 #[allow(clippy::too_many_lines)]
-pub async fn start_channels(config: Config) -> Result<()> {
+pub async fn start_channels(config: Config, secret_registry: Option<Arc<crate::secrets::SecretRegistry>>) -> Result<()> {
     let provider_name = resolved_default_provider(&config);
     let model = resolved_default_model(&config);
     let provider_runtime_options = providers::ProviderRuntimeOptions {
@@ -4778,7 +4778,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
         &config.agents,
         config.api_key.as_deref(),
         &config,
-        None,
+        secret_registry,
     ));
 
     let skills = crate::skills::load_skills_with_config(&workspace, &config);
@@ -8224,7 +8224,7 @@ BTC is currently around $65,000 based on latest tool output."#
         }];
 
         let config_path = cfg.config_path.clone();
-        let result = start_channels(cfg).await;
+        let result = start_channels(cfg, None).await;
         let mut store = runtime_config_store()
             .lock()
             .unwrap_or_else(|e| e.into_inner());

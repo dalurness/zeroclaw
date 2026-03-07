@@ -10,11 +10,12 @@ use std::sync::Arc;
 pub struct CronRunTool {
     config: Arc<Config>,
     security: Arc<SecurityPolicy>,
+    secret_registry: Option<Arc<crate::secrets::SecretRegistry>>,
 }
 
 impl CronRunTool {
-    pub fn new(config: Arc<Config>, security: Arc<SecurityPolicy>) -> Self {
-        Self { config, security }
+    pub fn new(config: Arc<Config>, security: Arc<SecurityPolicy>, secret_registry: Option<Arc<crate::secrets::SecretRegistry>>) -> Self {
+        Self { config, security, secret_registry }
     }
 }
 
@@ -116,7 +117,7 @@ impl Tool for CronRunTool {
         }
 
         let started_at = Utc::now();
-        let (success, output) = cron::scheduler::execute_job_now(&self.config, &job).await;
+        let (success, output) = cron::scheduler::execute_job_now(&self.config, &job, &self.secret_registry).await;
         let finished_at = Utc::now();
         let duration_ms = (finished_at - started_at).num_milliseconds();
         let status = if success { "ok" } else { "error" };
@@ -180,7 +181,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cfg = test_config(&tmp).await;
         let job = cron::add_job(&cfg, "*/5 * * * *", "echo run-now").unwrap();
-        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg));
+        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg), None);
 
         let result = tool.execute(json!({ "job_id": job.id })).await.unwrap();
         assert!(result.success, "{:?}", result.error);
@@ -193,7 +194,7 @@ mod tests {
     async fn errors_for_missing_job() {
         let tmp = TempDir::new().unwrap();
         let cfg = test_config(&tmp).await;
-        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg));
+        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg), None);
 
         let result = tool
             .execute(json!({ "job_id": "missing-job-id" }))
@@ -215,7 +216,7 @@ mod tests {
         std::fs::create_dir_all(&config.workspace_dir).unwrap();
         let cfg = Arc::new(config);
         let job = cron::add_job(&cfg, "*/5 * * * *", "echo run-now").unwrap();
-        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg));
+        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg), None);
 
         let result = tool.execute(json!({ "job_id": job.id })).await.unwrap();
         assert!(!result.success);
@@ -235,7 +236,7 @@ mod tests {
         std::fs::create_dir_all(&config.workspace_dir).unwrap();
         let cfg = Arc::new(config);
         let job = cron::add_job(&cfg, "*/5 * * * *", "touch cron-run-approval").unwrap();
-        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg));
+        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg), None);
 
         let denied = tool.execute(json!({ "job_id": job.id })).await.unwrap();
         assert!(!denied.success);
@@ -264,7 +265,7 @@ mod tests {
         std::fs::create_dir_all(&config.workspace_dir).unwrap();
         let cfg = Arc::new(config);
         let job = cron::add_job(&cfg, "*/5 * * * *", "echo run-now").unwrap();
-        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg));
+        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg), None);
 
         let result = tool.execute(json!({ "job_id": job.id })).await.unwrap();
         assert!(!result.success);

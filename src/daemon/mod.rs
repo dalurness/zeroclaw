@@ -56,7 +56,7 @@ async fn wait_for_shutdown_signal() -> Result<ShutdownSignal> {
     }
 }
 
-pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
+pub async fn run(config: Config, host: String, port: u16, secret_registry: Option<std::sync::Arc<crate::secrets::SecretRegistry>>) -> Result<()> {
     let initial_backoff = config.reliability.channel_initial_backoff_secs.max(1);
     let max_backoff = config
         .reliability
@@ -76,6 +76,7 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
     {
         let gateway_cfg = config.clone();
         let gateway_host = host.clone();
+        let gateway_secret_registry = secret_registry.clone();
         handles.push(spawn_component_supervisor(
             "gateway",
             initial_backoff,
@@ -83,7 +84,8 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
             move || {
                 let cfg = gateway_cfg.clone();
                 let host = gateway_host.clone();
-                async move { crate::gateway::run_gateway(&host, port, cfg).await }
+                let sr = gateway_secret_registry.clone();
+                async move { crate::gateway::run_gateway(&host, port, cfg, sr).await }
             },
         ));
     }
@@ -91,13 +93,15 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
     {
         if has_supervised_channels(&config) {
             let channels_cfg = config.clone();
+            let channels_secret_registry = secret_registry.clone();
             handles.push(spawn_component_supervisor(
                 "channels",
                 initial_backoff,
                 max_backoff,
                 move || {
                     let cfg = channels_cfg.clone();
-                    async move { crate::channels::start_channels(cfg).await }
+                    let sr = channels_secret_registry.clone();
+                    async move { crate::channels::start_channels(cfg, sr).await }
                 },
             ));
         } else {
@@ -108,26 +112,30 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
 
     if config.heartbeat.enabled {
         let heartbeat_cfg = config.clone();
+        let heartbeat_secret_registry = secret_registry.clone();
         handles.push(spawn_component_supervisor(
             "heartbeat",
             initial_backoff,
             max_backoff,
             move || {
                 let cfg = heartbeat_cfg.clone();
-                async move { Box::pin(run_heartbeat_worker(cfg)).await }
+                let sr = heartbeat_secret_registry.clone();
+                async move { Box::pin(run_heartbeat_worker(cfg, sr)).await }
             },
         ));
     }
 
     if config.cron.enabled {
         let scheduler_cfg = config.clone();
+        let scheduler_secret_registry = secret_registry.clone();
         handles.push(spawn_component_supervisor(
             "scheduler",
             initial_backoff,
             max_backoff,
             move || {
                 let cfg = scheduler_cfg.clone();
-                async move { crate::cron::scheduler::run(cfg).await }
+                let sr = scheduler_secret_registry.clone();
+                async move { crate::cron::scheduler::run(cfg, sr).await }
             },
         ));
     } else {
@@ -242,7 +250,7 @@ where
     })
 }
 
-async fn run_heartbeat_worker(config: Config) -> Result<()> {
+async fn run_heartbeat_worker(config: Config, secret_registry: Option<std::sync::Arc<crate::secrets::SecretRegistry>>) -> Result<()> {
     let observer: std::sync::Arc<dyn crate::observability::Observer> =
         std::sync::Arc::from(crate::observability::create_observer(&config.observability));
     let engine = crate::heartbeat::engine::HeartbeatEngine::new(
@@ -275,6 +283,7 @@ async fn run_heartbeat_worker(config: Config) -> Result<()> {
                 temp,
                 vec![],
                 false,
+                secret_registry.clone(),
             )
             .await
             {
