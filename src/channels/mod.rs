@@ -3078,10 +3078,12 @@ semantic_match={:.2} (threshold {:.2}), category={}.",
     let timestamped_content = format!("[{now}] {}", msg.content);
 
     // Preserve user turn before the LLM call so interrupted requests keep context.
+    // Store the original content (without timestamp) so conversation history
+    // stays clean; the timestamp is injected only into the LLM-bound history.
     append_sender_turn(
         ctx.as_ref(),
         &history_key,
-        ChatMessage::user(&timestamped_content),
+        ChatMessage::user(&msg.content),
     );
 
     // Build history from per-sender conversation cache.
@@ -3093,6 +3095,18 @@ semantic_match={:.2} (threshold {:.2}), category={}.",
         .cloned()
         .unwrap_or_default();
     let mut prior_turns = normalize_cached_channel_turns(prior_turns_raw);
+
+    // Inject the timestamp into the current message within the most recent
+    // user turn for LLM context only. The turn may contain merged content
+    // from interrupted prior messages, so replace only the trailing portion
+    // that matches the current message.
+    if let Some(last_turn) = prior_turns.last_mut() {
+        if last_turn.role == "user" {
+            if let Some(prefix) = last_turn.content.strip_suffix(&msg.content) {
+                last_turn.content = format!("{prefix}{timestamped_content}");
+            }
+        }
+    }
 
     // Only enrich with memory context when there is no prior conversation
     // history. Follow-up turns already include context from previous messages.
@@ -3625,7 +3639,7 @@ semantic_match={:.2} (threshold {:.2}), category={}.",
                     .downcast_ref::<providers::ProviderCapabilityError>()
                     .is_some_and(|capability| capability.capability.eq_ignore_ascii_case("vision"));
                 let rolled_back = should_rollback_user_turn
-                    && rollback_orphan_user_turn(ctx.as_ref(), &history_key, &timestamped_content);
+                    && rollback_orphan_user_turn(ctx.as_ref(), &history_key, &msg.content);
 
                 if !rolled_back {
                     // Close the orphan user turn so subsequent messages don't
@@ -6140,7 +6154,10 @@ BTC is currently around $65,000 based on latest tool output."#
             query_classification: crate::config::QueryClassificationConfig::default(),
             model_routes: Vec::new(),
             approval_manager: Arc::new(ApprovalManager::from_config(
-                &crate::config::AutonomyConfig::default(),
+                &crate::config::AutonomyConfig {
+                    level: crate::security::AutonomyLevel::Full,
+                    ..Default::default()
+                },
             )),
             multimodal: crate::config::MultimodalConfig::default(),
             hooks: None,
@@ -6204,7 +6221,10 @@ BTC is currently around $65,000 based on latest tool output."#
             query_classification: crate::config::QueryClassificationConfig::default(),
             model_routes: Vec::new(),
             approval_manager: Arc::new(ApprovalManager::from_config(
-                &crate::config::AutonomyConfig::default(),
+                &crate::config::AutonomyConfig {
+                    level: crate::security::AutonomyLevel::Full,
+                    ..Default::default()
+                },
             )),
             multimodal: crate::config::MultimodalConfig::default(),
             hooks: None,
@@ -6494,7 +6514,10 @@ BTC is currently around $65,000 based on latest tool output."#
             query_classification: crate::config::QueryClassificationConfig::default(),
             model_routes: Vec::new(),
             approval_manager: Arc::new(ApprovalManager::from_config(
-                &crate::config::AutonomyConfig::default(),
+                &crate::config::AutonomyConfig {
+                    level: crate::security::AutonomyLevel::Full,
+                    ..Default::default()
+                },
             )),
         });
 
@@ -8275,7 +8298,10 @@ BTC is currently around $65,000 based on latest tool output."#
             query_classification: crate::config::QueryClassificationConfig::default(),
             model_routes: Vec::new(),
             approval_manager: Arc::new(ApprovalManager::from_config(
-                &crate::config::AutonomyConfig::default(),
+                &crate::config::AutonomyConfig {
+                    level: crate::security::AutonomyLevel::Full,
+                    ..Default::default()
+                },
             )),
         });
 
@@ -8340,7 +8366,10 @@ BTC is currently around $65,000 based on latest tool output."#
             query_classification: crate::config::QueryClassificationConfig::default(),
             model_routes: Vec::new(),
             approval_manager: Arc::new(ApprovalManager::from_config(
-                &crate::config::AutonomyConfig::default(),
+                &crate::config::AutonomyConfig {
+                    level: crate::security::AutonomyLevel::Full,
+                    ..Default::default()
+                },
             )),
         });
 
