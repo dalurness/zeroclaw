@@ -20,7 +20,7 @@ const MIN_POLL_SECONDS: u64 = 5;
 const SHELL_JOB_TIMEOUT_SECS: u64 = 120;
 const SCHEDULER_COMPONENT: &str = "scheduler";
 
-pub async fn run(config: Config, secret_registry: Option<Arc<crate::secrets::SecretRegistry>>) -> Result<()> {
+pub async fn run(config: Config) -> Result<()> {
     let poll_secs = config.reliability.scheduler_poll_secs.max(MIN_POLL_SECONDS);
     let mut interval = time::interval(Duration::from_secs(poll_secs));
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
@@ -45,20 +45,19 @@ pub async fn run(config: Config, secret_registry: Option<Arc<crate::secrets::Sec
             }
         };
 
-        process_due_jobs(&config, &security, jobs, SCHEDULER_COMPONENT, &secret_registry).await;
+        process_due_jobs(&config, &security, jobs, SCHEDULER_COMPONENT).await;
     }
 }
 
-pub async fn execute_job_now(config: &Config, job: &CronJob, secret_registry: &Option<Arc<crate::secrets::SecretRegistry>>) -> (bool, String) {
+pub async fn execute_job_now(config: &Config, job: &CronJob) -> (bool, String) {
     let security = SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir);
-    execute_job_with_retry(config, &security, job, secret_registry).await
+    execute_job_with_retry(config, &security, job).await
 }
 
 async fn execute_job_with_retry(
     config: &Config,
     security: &SecurityPolicy,
     job: &CronJob,
-    secret_registry: &Option<Arc<crate::secrets::SecretRegistry>>,
 ) -> (bool, String) {
     let mut last_output = String::new();
     let retries = config.reliability.scheduler_retries;
@@ -67,7 +66,7 @@ async fn execute_job_with_retry(
     for attempt in 0..=retries {
         let (success, output) = match job.job_type {
             JobType::Shell => run_job_command(config, security, job).await,
-            JobType::Agent => run_agent_job(config, security, job, secret_registry).await,
+            JobType::Agent => run_agent_job(config, security, job).await,
         };
         last_output = output;
 
@@ -95,7 +94,6 @@ async fn process_due_jobs(
     security: &Arc<SecurityPolicy>,
     jobs: Vec<CronJob>,
     component: &str,
-    secret_registry: &Option<Arc<crate::secrets::SecretRegistry>>,
 ) {
     // Refresh scheduler health on every successful poll cycle, including idle cycles.
     crate::health::mark_component_ok(component);
@@ -107,9 +105,8 @@ async fn process_due_jobs(
                 let config = config.clone();
                 let security = Arc::clone(security);
                 let component = component.to_owned();
-                let sr = secret_registry.clone();
                 async move {
-                    execute_and_persist_job(&config, security.as_ref(), &job, &component, &sr).await
+                    execute_and_persist_job(&config, security.as_ref(), &job, &component).await
                 }
             }),
         )
@@ -127,13 +124,12 @@ async fn execute_and_persist_job(
     security: &SecurityPolicy,
     job: &CronJob,
     component: &str,
-    secret_registry: &Option<Arc<crate::secrets::SecretRegistry>>,
 ) -> (String, bool, String) {
     crate::health::mark_component_ok(component);
     warn_if_high_frequency_agent_job(job);
 
     let started_at = Utc::now();
-    let (success, output) = execute_job_with_retry(config, security, job, secret_registry).await;
+    let (success, output) = execute_job_with_retry(config, security, job).await;
     let finished_at = Utc::now();
     let success = persist_job_result(config, job, success, &output, started_at, finished_at).await;
 
@@ -144,7 +140,6 @@ async fn run_agent_job(
     config: &Config,
     security: &SecurityPolicy,
     job: &CronJob,
-    secret_registry: &Option<Arc<crate::secrets::SecretRegistry>>,
 ) -> (bool, String) {
     if !security.can_act() {
         return (
@@ -181,7 +176,6 @@ async fn run_agent_job(
                 config.default_temperature,
                 vec![],
                 false,
-                secret_registry.clone(),
             )
             .await
         }

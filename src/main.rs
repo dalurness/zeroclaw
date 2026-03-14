@@ -38,7 +38,6 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use dialoguer::{Input, Password};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
-use std::sync::Arc;
 use tracing::{info, warn};
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -848,7 +847,7 @@ async fn main() -> Result<()> {
         }?;
         // Auto-start channels if user said yes during wizard
         if std::env::var("ZEROCLAW_AUTOSTART_CHANNELS").as_deref() == Ok("1") {
-            channels::start_channels(config, None).await?;
+            channels::start_channels(config).await?;
         }
         return Ok(());
     }
@@ -871,45 +870,9 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Build the SecretRegistry once and keep it alive for the daemon lifetime.
-    // Used for migration below, then threaded to gateway/channels/agent so the
-    // secrets LLM tools (secrets_set, secrets_list, etc.) are registered.
-    let secret_registry: Option<Arc<zeroclaw::secrets::SecretRegistry>> = {
-        let config_dir = config
-            .config_path
-            .parent()
-            .context("Config path must have a parent directory")?;
-        let stores_config = zeroclaw::secrets::SecretsStoresConfig {
-            cli_get_enabled: config.secrets.cli_get_enabled,
-            stores: config
-                .secrets
-                .stores
-                .iter()
-                .map(|s| zeroclaw::secrets::SecretStoreConfig {
-                    name: s.name.clone(),
-                    backend: s.backend.clone(),
-                    store_path: s.store_path.clone(),
-                    provider_binary: s.provider_binary.clone(),
-                })
-                .collect(),
-        };
-        match zeroclaw::secrets::build_registry(
-            &stores_config,
-            &config.workspace_dir,
-            config_dir,
-            config.secrets.encrypt,
-        ) {
-            Ok(registry) => Some(Arc::new(registry)),
-            Err(e) => {
-                tracing::warn!("secrets: failed to build registry: {e}");
-                None
-            }
-        }
-    };
-
     // Phase 4: Migrate credentials from config.toml to secret store on startup.
     // Only runs if there are credentials to migrate (api_key or channel tokens present).
-    if let Some(ref registry) = secret_registry {
+    if let Ok(registry) = zeroclaw::secrets::build_registry(&config) {
         let has_credentials = config.api_key.is_some()
             || config
                 .channels_config
@@ -930,7 +893,7 @@ async fn main() -> Result<()> {
             if let Err(e) =
                 zeroclaw::secrets::migration::migrate_config_credentials(
                     &mut config,
-                    registry,
+                    &registry,
                 )
                 .await
             {
@@ -981,7 +944,6 @@ async fn main() -> Result<()> {
                 temperature,
                 peripheral,
                 true,
-                secret_registry.clone(),
             ))
             .await
             .map(|_| ())
@@ -1007,7 +969,7 @@ async fn main() -> Result<()> {
             } else {
                 info!("🚀 Starting ZeroClaw Gateway on {host}:{port}");
             }
-            gateway::run_gateway(&host, port, config, secret_registry.clone()).await
+            gateway::run_gateway(&host, port, config).await
         }
 
         Commands::Daemon { port, host } => {
@@ -1018,7 +980,7 @@ async fn main() -> Result<()> {
             } else {
                 info!("🧠 Starting ZeroClaw Daemon on {host}:{port}");
             }
-            daemon::run(config, host, port, secret_registry.clone()).await
+            daemon::run(config, host, port).await
         }
 
         Commands::Status => {
@@ -1217,7 +1179,7 @@ async fn main() -> Result<()> {
         },
 
         Commands::Channel { channel_command } => match channel_command {
-            ChannelCommands::Start => channels::start_channels(config, secret_registry.clone()).await,
+            ChannelCommands::Start => channels::start_channels(config).await,
             ChannelCommands::Doctor => channels::doctor_channels(config).await,
             other => channels::handle_command(other, &config).await,
         },
@@ -1480,30 +1442,7 @@ async fn handle_secrets_command(
     command: zeroclaw::SecretsCommands,
     config: &Config,
 ) -> Result<()> {
-    let config_dir = config
-        .config_path
-        .parent()
-        .context("Config path must have a parent directory")?;
-    let stores_config = zeroclaw::secrets::SecretsStoresConfig {
-        cli_get_enabled: config.secrets.cli_get_enabled,
-        stores: config
-            .secrets
-            .stores
-            .iter()
-            .map(|s| zeroclaw::secrets::SecretStoreConfig {
-                name: s.name.clone(),
-                backend: s.backend.clone(),
-                store_path: s.store_path.clone(),
-                provider_binary: s.provider_binary.clone(),
-            })
-            .collect(),
-    };
-    let registry = zeroclaw::secrets::build_registry(
-        &stores_config,
-        &config.workspace_dir,
-        config_dir,
-        config.secrets.encrypt,
-    )?;
+    let registry = zeroclaw::secrets::build_registry(config)?;
 
     match command {
         zeroclaw::SecretsCommands::Set { key, value, store } => {
@@ -1560,7 +1499,11 @@ async fn handle_secrets_command(
 
         zeroclaw::SecretsCommands::RotateKey { store } => {
             // Rotate-key only works for local backends
-            let stores_list = &stores_config.stores;
+            let config_dir = config
+                .config_path
+                .parent()
+                .context("Config path must have a parent directory")?;
+            let stores_list = &config.secrets.stores;
             let target_name = store.as_deref().unwrap_or_else(|| {
                 stores_list
                     .first()
@@ -1608,8 +1551,8 @@ async fn handle_secrets_command(
             } else {
                 println!("NAME         BACKEND    DEFAULT");
                 for s in &info {
-                    // Determine backend from config
-                    let backend = stores_config
+                    let backend = config
+                        .secrets
                         .stores
                         .iter()
                         .find(|e| e.name == s.name)

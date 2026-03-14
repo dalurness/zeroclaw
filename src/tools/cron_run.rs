@@ -10,12 +10,11 @@ use std::sync::Arc;
 pub struct CronRunTool {
     config: Arc<Config>,
     security: Arc<SecurityPolicy>,
-    secret_registry: Option<Arc<crate::secrets::SecretRegistry>>,
 }
 
 impl CronRunTool {
-    pub fn new(config: Arc<Config>, security: Arc<SecurityPolicy>, secret_registry: Option<Arc<crate::secrets::SecretRegistry>>) -> Self {
-        Self { config, security, secret_registry }
+    pub fn new(config: Arc<Config>, security: Arc<SecurityPolicy>) -> Self {
+        Self { config, security }
     }
 }
 
@@ -117,7 +116,7 @@ impl Tool for CronRunTool {
         }
 
         let started_at = Utc::now();
-        let (success, output) = cron::scheduler::execute_job_now(&self.config, &job, &self.secret_registry).await;
+        let (success, output) = cron::scheduler::execute_job_now(&self.config, &job).await;
         let finished_at = Utc::now();
         let duration_ms = (finished_at - started_at).num_milliseconds();
         let status = if success { "ok" } else { "error" };

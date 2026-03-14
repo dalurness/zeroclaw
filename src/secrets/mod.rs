@@ -12,7 +12,6 @@ pub mod tools;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// Trait implemented by each secret storage backend.
@@ -189,50 +188,24 @@ pub fn validate_key(key: &str) -> Result<()> {
     Ok(())
 }
 
-/// Configuration for the secrets subsystem, parsed from `[secrets]` in config.toml.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecretsStoresConfig {
-    /// Whether `zeroclaw secrets get` is enabled from CLI.
-    #[serde(default)]
-    pub cli_get_enabled: bool,
-    /// Ordered list of named stores. Config order is precedence order.
-    #[serde(default)]
-    pub stores: Vec<SecretStoreConfig>,
-}
+/// Build a `SecretRegistry` from the application `Config`.
+///
+/// Each entry point (agent, gateway, channels, CLI) calls this independently —
+/// following the same pattern as `SecurityPolicy::from_config`, `create_observer`, etc.
+///
+/// Zero-config fallback: if no stores are defined, instantiate a single local
+/// store at `<workspace>/.secrets`.
+pub fn build_registry(config: &crate::config::Config) -> Result<SecretRegistry> {
+    let workspace_dir = &config.workspace_dir;
+    let config_dir = config
+        .config_path
+        .parent()
+        .ok_or_else(|| anyhow!("config path must have a parent directory"))?;
+    let encrypt_enabled = config.secrets.encrypt;
 
-impl Default for SecretsStoresConfig {
-    fn default() -> Self {
-        Self {
-            cli_get_enabled: false,
-            stores: Vec::new(),
-        }
-    }
-}
-
-/// Configuration for a single secret store entry in `[[secrets.stores]]`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecretStoreConfig {
-    pub name: String,
-    pub backend: String,
-    /// Path to the `.secrets` file (local backend only).
-    #[serde(default)]
-    pub store_path: Option<String>,
-    /// Path to the provider binary (external backend only).
-    #[serde(default)]
-    pub provider_binary: Option<String>,
-}
-
-/// Build a `SecretRegistry` from config. Zero-config fallback: if no stores
-/// are defined, instantiate a single local store at `<workspace>/.secrets`.
-pub fn build_registry(
-    stores_config: &SecretsStoresConfig,
-    workspace_dir: &std::path::Path,
-    config_dir: &std::path::Path,
-    encrypt_enabled: bool,
-) -> Result<SecretRegistry> {
     let mut stores: Vec<(String, Arc<dyn SecretStore>)> = Vec::new();
 
-    if stores_config.stores.is_empty() {
+    if config.secrets.stores.is_empty() {
         // Zero-config fallback: single local store
         let store = local::LocalSecretStore::new(
             workspace_dir.join(".secrets"),
@@ -241,7 +214,7 @@ pub fn build_registry(
         )?;
         stores.push(("local".to_string(), Arc::new(store)));
     } else {
-        for entry in &stores_config.stores {
+        for entry in &config.secrets.stores {
             let store: Arc<dyn SecretStore> = match entry.backend.as_str() {
                 "local" => {
                     let path = entry
