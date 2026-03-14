@@ -180,7 +180,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cfg = test_config(&tmp).await;
         let job = cron::add_job(&cfg, "*/5 * * * *", "echo run-now").unwrap();
-        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg));
+        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg), None);
 
         let result = tool.execute(json!({ "job_id": job.id })).await.unwrap();
         assert!(result.success, "{:?}", result.error);
@@ -193,7 +193,7 @@ mod tests {
     async fn errors_for_missing_job() {
         let tmp = TempDir::new().unwrap();
         let cfg = test_config(&tmp).await;
-        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg));
+        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg), None);
 
         let result = tool
             .execute(json!({ "job_id": "missing-job-id" }))
@@ -215,7 +215,7 @@ mod tests {
         std::fs::create_dir_all(&config.workspace_dir).unwrap();
         let cfg = Arc::new(config);
         let job = cron::add_job(&cfg, "*/5 * * * *", "echo run-now").unwrap();
-        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg));
+        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg), None);
 
         let result = tool.execute(json!({ "job_id": job.id })).await.unwrap();
         assert!(!result.success);
@@ -235,7 +235,7 @@ mod tests {
         std::fs::create_dir_all(&config.workspace_dir).unwrap();
         let cfg = Arc::new(config);
         let job = cron::add_job(&cfg, "*/5 * * * *", "touch cron-run-approval").unwrap();
-        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg));
+        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg), None);
 
         let denied = tool.execute(json!({ "job_id": job.id })).await.unwrap();
         assert!(!denied.success);
@@ -264,7 +264,7 @@ mod tests {
         std::fs::create_dir_all(&config.workspace_dir).unwrap();
         let cfg = Arc::new(config);
         let job = cron::add_job(&cfg, "*/5 * * * *", "echo run-now").unwrap();
-        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg));
+        let tool = CronRunTool::new(cfg.clone(), test_security(&cfg), None);
 
         let result = tool.execute(json!({ "job_id": job.id })).await.unwrap();
         assert!(!result.success);

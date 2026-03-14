@@ -8223,7 +8223,7 @@ BTC is currently around $65,000 based on latest tool output."#
         }];
 
         let config_path = cfg.config_path.clone();
-        let result = start_channels(cfg).await;
+        let result = start_channels(cfg, None).await;
         let mut store = runtime_config_store()
             .lock()
             .unwrap_or_else(|e| e.into_inner());

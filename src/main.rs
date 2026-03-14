@@ -497,6 +497,24 @@ Examples:
         memory_command: MemoryCommands,
     },
 
+    /// Manage secrets (API keys, tokens, credentials)
+    #[command(long_about = "\
+Manage secrets stored in the ZeroClaw secret store.
+
+Store, retrieve, list, delete, and inject secrets. Secrets are encrypted \
+at rest using ChaCha20-Poly1305. Multiple named stores can be configured \
+(local encrypted file or external provider binary).
+
+Examples:
+  zeroclaw secrets set GMAIL_KEY sk-abc123
+  zeroclaw secrets list
+  zeroclaw secrets inject script.js | node
+  zeroclaw secrets stores")]
+    Secrets {
+        #[command(subcommand)]
+        secrets_command: zeroclaw::SecretsCommands,
+    },
+
     /// Manage configuration
     #[command(long_about = "\
 Manage ZeroClaw configuration.
@@ -852,6 +870,38 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Phase 4: Migrate credentials from config.toml to secret store on startup.
+    // Only runs if there are credentials to migrate (api_key or channel tokens present).
+    if let Ok(registry) = zeroclaw::secrets::build_registry(&config) {
+        let has_credentials = config.api_key.is_some()
+            || config
+                .channels_config
+                .telegram
+                .as_ref()
+                .is_some_and(|t| !t.bot_token.is_empty())
+            || config
+                .channels_config
+                .discord
+                .as_ref()
+                .is_some_and(|d| !d.bot_token.is_empty())
+            || config
+                .channels_config
+                .slack
+                .as_ref()
+                .is_some_and(|s| !s.bot_token.is_empty());
+        if has_credentials {
+            if let Err(e) =
+                zeroclaw::secrets::migration::migrate_config_credentials(
+                    &mut config,
+                    &registry,
+                )
+                .await
+            {
+                tracing::warn!("secrets migration: {e}");
+            }
+        }
+    }
+
     match cli.command {
         Commands::Onboard { .. } | Commands::Completions { .. } => unreachable!(),
 
@@ -1148,6 +1198,10 @@ async fn main() -> Result<()> {
             memory::cli::handle_command(memory_command, &config).await
         }
 
+        Commands::Secrets { secrets_command } => {
+            handle_secrets_command(secrets_command, &config).await
+        }
+
         Commands::Auth { auth_command } => handle_auth_command(auth_command, &config).await,
 
         Commands::Hardware { hardware_command } => {
@@ -1377,6 +1431,137 @@ async fn handle_security_command(
             println!("  Parsed records:   {}", report.parsed_records);
             println!("  Upserted records: {}", report.upserted_records);
             println!("  Collection:       {}", report.collection);
+            Ok(())
+        }
+    }
+}
+
+// ─── Secrets Command Handler ─────────────────────────────────────────────────
+
+async fn handle_secrets_command(
+    command: zeroclaw::SecretsCommands,
+    config: &Config,
+) -> Result<()> {
+    let registry = zeroclaw::secrets::build_registry(config)?;
+
+    match command {
+        zeroclaw::SecretsCommands::Set { key, value, store } => {
+            registry.set(&key, &value, store.as_deref()).await?;
+            println!("Stored secret: {}", key.to_ascii_uppercase());
+            Ok(())
+        }
+
+        zeroclaw::SecretsCommands::Get { key, store } => {
+            if !config.secrets.cli_get_enabled {
+                bail!(
+                    "secrets get is disabled by default. Set secrets.cli_get_enabled = true in config.toml to enable."
+                );
+            }
+            let value = registry.get(&key, store.as_deref()).await?;
+            print!("{value}");
+            Ok(())
+        }
+
+        zeroclaw::SecretsCommands::List { all, store } => {
+            let keys = registry.list(store.as_deref(), all).await?;
+            if keys.is_empty() {
+                println!("No secrets stored.");
+            } else {
+                for key in keys {
+                    println!("{key}");
+                }
+            }
+            Ok(())
+        }
+
+        zeroclaw::SecretsCommands::Delete { key, store } => {
+            registry.delete(&key, store.as_deref()).await?;
+            println!("Deleted secret: {key}");
+            Ok(())
+        }
+
+        zeroclaw::SecretsCommands::Inject { file, store } => {
+            let content = if file == "-" {
+                use tokio::io::AsyncReadExt;
+                let mut buf = String::new();
+                tokio::io::stdin().read_to_string(&mut buf).await?;
+                buf
+            } else {
+                let expanded = shellexpand::tilde(&file);
+                tokio::fs::read_to_string(expanded.as_ref())
+                    .await
+                    .with_context(|| format!("failed to read file: {file}"))?
+            };
+            let result = registry.inject(&content, store.as_deref()).await?;
+            print!("{result}");
+            Ok(())
+        }
+
+        zeroclaw::SecretsCommands::RotateKey { store } => {
+            // Rotate-key only works for local backends
+            let config_dir = config
+                .config_path
+                .parent()
+                .context("Config path must have a parent directory")?;
+            let stores_list = &config.secrets.stores;
+            let target_name = store.as_deref().unwrap_or_else(|| {
+                stores_list
+                    .first()
+                    .map(|s| s.name.as_str())
+                    .unwrap_or("local")
+            });
+
+            let entry = stores_list
+                .iter()
+                .find(|s| s.name == target_name)
+                .or_else(|| {
+                    if stores_list.is_empty() {
+                        None
+                    } else {
+                        Some(&stores_list[0])
+                    }
+                });
+
+            let backend = entry.map(|e| e.backend.as_str()).unwrap_or("local");
+            if backend != "local" {
+                bail!("rotate-key is only supported for local backends (store '{target_name}' uses '{backend}')");
+            }
+
+            let path = entry
+                .and_then(|e| e.store_path.as_deref())
+                .map(|p| {
+                    let expanded = shellexpand::tilde(p);
+                    std::path::PathBuf::from(expanded.as_ref())
+                })
+                .unwrap_or_else(|| config.workspace_dir.join(".secrets"));
+
+            let local_store =
+                zeroclaw::secrets::local::LocalSecretStore::new(path, config_dir, config.secrets.encrypt)?;
+            local_store.rotate_key()?;
+            println!("Secret store '{target_name}' re-encrypted with fresh nonce.");
+            Ok(())
+        }
+
+        zeroclaw::SecretsCommands::Stores => {
+            let info = registry.store_info();
+            if info.is_empty() {
+                println!("No secret stores configured (using zero-config local fallback).");
+                println!("NAME         BACKEND    DEFAULT");
+                println!("local        local      yes");
+            } else {
+                println!("NAME         BACKEND    DEFAULT");
+                for s in &info {
+                    let backend = config
+                        .secrets
+                        .stores
+                        .iter()
+                        .find(|e| e.name == s.name)
+                        .map(|e| e.backend.as_str())
+                        .unwrap_or("local");
+                    let default_marker = if s.is_default { "yes" } else { "" };
+                    println!("{:<12} {:<10} {}", s.name, backend, default_marker);
+                }
+            }
             Ok(())
         }
     }

@@ -523,6 +523,32 @@ pub fn all_tools_with_runtime(
         }
     }
 
+    // Secrets tools — registered when a registry can be built from config
+    let secret_registry = match crate::secrets::build_registry(root_config) {
+        Ok(reg) => Some(Arc::new(reg)),
+        Err(e) => {
+            tracing::warn!("secrets: failed to build registry: {e}");
+            None
+        }
+    };
+    if let Some(ref reg) = secret_registry {
+        tool_arcs.push(Arc::new(
+            crate::secrets::tools::SecretsSetTool::new(reg.clone()),
+        ));
+        tool_arcs.push(Arc::new(
+            crate::secrets::tools::SecretsListTool::new(reg.clone()),
+        ));
+        tool_arcs.push(Arc::new(
+            crate::secrets::tools::SecretsDeleteTool::new(reg.clone()),
+        ));
+        tool_arcs.push(Arc::new(
+            crate::secrets::tools::SecretsInjectTool::new(reg.clone()),
+        ));
+        tool_arcs.push(Arc::new(
+            crate::secrets::tools::SecretsStoresTool::new(reg.clone()),
+        ));
+    }
+
     boxed_registry_from_arcs(tool_arcs)
 }
 
@@ -608,6 +634,7 @@ mod tests {
             &HashMap::new(),
             None,
             &cfg,
+            None,
         );
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(!names.contains(&"browser_open"));
@@ -650,6 +677,7 @@ mod tests {
             &HashMap::new(),
             None,
             &cfg,
+            None,
         );
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"browser_open"));
@@ -690,6 +718,7 @@ mod tests {
             &HashMap::new(),
             None,
             &cfg,
+            None,
         );
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"wasm_module"));
@@ -842,6 +871,7 @@ mod tests {
             &agents,
             Some("delegate-test-credential"),
             &cfg,
+            None,
         );
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"delegate"));
@@ -876,6 +906,7 @@ mod tests {
             &HashMap::new(),
             None,
             &cfg,
+            None,
         );
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(!names.contains(&"delegate"));
@@ -927,6 +958,7 @@ mod tests {
             &agents,
             Some("delegate-test-credential"),
             &cfg,
+            None,
         );
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"delegate"));
